@@ -378,16 +378,18 @@
   }
   @media (max-width: 860px) { .scroll-hint { display: block; } }
 
-  /* ── PIXEL POPUP (고정형 — 클릭 가능) ── */
+  /* ── PIXEL POPUP (캔버스 컨테이너 안에 absolute 고정) ── */
+  .grid-border { position: relative; }
+
   #pixel-popup {
-    position: fixed;
+    position: absolute;
     background: #0a1a14;
     border: 1px solid #00ffe5;
     border-radius: 4px;
     padding: 12px 14px;
     font-size: 11px;
     color: #00ffe5;
-    z-index: 1000;
+    z-index: 100;
     display: none;
     max-width: 240px;
     min-width: 180px;
@@ -405,7 +407,6 @@
     transition: background 0.15s;
   }
   #pixel-popup .pp-sub:hover { background: rgba(255,45,155,0.15); }
-  #pixel-popup .pp-empty  { color: rgba(0,255,229,0.45); font-size: 10px; }
   #pixel-popup .pp-close  {
     position: absolute; top: 6px; right: 8px;
     font-size: 13px; color: rgba(0,255,229,0.35);
@@ -413,7 +414,7 @@
   }
   #pixel-popup .pp-close:hover { color: #00ffe5; }
 
-  /* 빈 픽셀 툴팁은 마우스 따라다니는 작은 것 유지 */
+  /* 빈 픽셀 툴팁 — 마우스 따라다님 */
   #tooltip {
     position: fixed; background: rgba(4,13,18,0.92); border: 1px solid rgba(0,255,229,0.3);
     border-radius: 3px; padding: 5px 10px; font-size: 10px; color: rgba(0,255,229,0.6);
@@ -636,14 +637,6 @@
 <body>
 
 <div class="scan-line"></div>
-
-<!-- 광고주 팝업 카드 (고정, 클릭 가능) -->
-<div id="pixel-popup">
-  <button class="pp-close" onclick="closePopup()">✕</button>
-  <div class="pp-title"  id="pp-title"></div>
-  <div class="pp-url"    id="pp-url"></div>
-  <div id="pp-sub-wrap"></div>
-</div>
 
 <!-- 빈 픽셀 좌표 툴팁 (마우스 따라다님) -->
 <div id="tooltip"></div>
@@ -947,6 +940,13 @@
         <div class="grid-corner bl"></div>
         <div class="grid-corner br"></div>
         <canvas id="pixelCanvas" width="1000" height="1000"></canvas>
+        <!-- 팝업을 캔버스와 같은 컨테이너 안에 배치 → absolute 위치 정확히 계산 -->
+        <div id="pixel-popup">
+          <button class="pp-close" onclick="closePopup()">✕</button>
+          <div class="pp-title"  id="pp-title"></div>
+          <div class="pp-url"    id="pp-url"></div>
+          <div id="pp-sub-wrap"></div>
+        </div>
       </div>
     </div>
     <div class="scroll-hint">← 좌우로 스크롤하여 전체 그리드를 탐색하세요 →</div>
@@ -1116,7 +1116,12 @@ const popup   = document.getElementById('pixel-popup');
 let popupAd   = null;
 let hideTimer = null;
 
-function showPopup(ad, canvasRect) {
+function showPopup(ad) {
+  // 이미 같은 광고주 팝업이 열려있으면 위치 재계산 안 함
+  if (popupAd && popupAd.id === ad.id) {
+    clearTimeout(hideTimer);
+    return;
+  }
   popupAd = ad;
   clearTimeout(hideTimer);
 
@@ -1124,30 +1129,28 @@ function showPopup(ad, canvasRect) {
   document.getElementById('pp-url').textContent   = ad.url;
 
   const wrap = document.getElementById('pp-sub-wrap');
-  if (ad.id) {
-    wrap.innerHTML =
-      `<a class="pp-sub" href="advertiser/index.html?id=${ad.id}" target="_blank" rel="noopener">
-        ▶ 광고주 상세페이지 보기
-      </a>`;
-  } else {
-    wrap.innerHTML = '';
-  }
+  wrap.innerHTML = ad.id
+    ? `<a class="pp-sub" href="advertiser/index.html?id=${ad.id}" target="_blank" rel="noopener">▶ 광고주 상세페이지 보기</a>`
+    : '';
 
-  // 팝업 위치: 광고 블록 오른쪽 상단에 고정
-  const px = ad.bx * BLOCK;
-  const py = ad.by * BLOCK;
-  const scale = canvasRect.width / CANVAS_SIZE;
-  const screenX = canvasRect.left + (px + ad.bw * BLOCK) * scale + 8;
-  const screenY = canvasRect.top  + py * scale;
+  // 캔버스 내부 좌표(%) → 팝업을 블록 오른쪽 상단에 고정
+  // canvas는 width:100%로 렌더되므로 % 단위로 위치 지정
+  const canvasW  = canvas.offsetWidth;   // 실제 렌더 너비(px)
+  const canvasH  = canvas.offsetHeight;
+  const scaleX   = canvasW  / CANVAS_SIZE;
+  const scaleY   = canvasH  / CANVAS_SIZE;
 
-  // 화면 오른쪽 넘침 방지
+  const blockRight = (ad.bx + ad.bw) * BLOCK * scaleX; // 블록 오른쪽 끝 px
+  const blockTop   = ad.by * BLOCK * scaleY;            // 블록 위쪽 끝 px
+
   const popW = 240;
-  const left = (screenX + popW > window.innerWidth)
-    ? canvasRect.left + px * scale - popW - 8
-    : screenX;
+  // 오른쪽에 공간 없으면 블록 왼쪽에 표시
+  const left = (blockRight + popW + 8 > canvasW)
+    ? ad.bx * BLOCK * scaleX - popW - 8
+    : blockRight + 8;
 
-  popup.style.left    = left + 'px';
-  popup.style.top     = Math.max(8, screenY) + 'px';
+  popup.style.left    = Math.max(0, left) + 'px';
+  popup.style.top     = Math.max(0, blockTop) + 'px';
   popup.style.display = 'block';
 }
 
@@ -1188,8 +1191,7 @@ canvas.addEventListener('mousemove', e => {
   const ad = findAd(bx, by);
   if (ad) {
     tooltip.style.display = 'none';
-    const rect = canvas.getBoundingClientRect();
-    showPopup(ad, rect);
+    showPopup(ad);
   } else {
     // 광고 블록 밖으로 나오면 팝업 딜레이 후 닫기
     if (popupAd) {
@@ -1218,8 +1220,7 @@ canvas.addEventListener('touchend', e => {
   const { bx, by } = getBlock(t.clientX, t.clientY);
   const ad = findAd(bx, by);
   if (ad) {
-    const rect = canvas.getBoundingClientRect();
-    showPopup(ad, rect);
+    showPopup(ad);
   }
 }, { passive: false });
 
