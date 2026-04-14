@@ -378,17 +378,47 @@
   }
   @media (max-width: 860px) { .scroll-hint { display: block; } }
 
-  /* ── TOOLTIP ── */
-  #tooltip {
-    position: fixed; background: #0a1a14; border: 1px solid #00ffe5;
-    border-radius: 3px; padding: 8px 12px; font-size: 11px; color: #00ffe5;
-    pointer-events: none; z-index: 1000; display: none; max-width: 220px;
-    box-shadow: 0 0 12px rgba(0,255,229,0.25);
+  /* ── PIXEL POPUP (고정형 — 클릭 가능) ── */
+  #pixel-popup {
+    position: fixed;
+    background: #0a1a14;
+    border: 1px solid #00ffe5;
+    border-radius: 4px;
+    padding: 12px 14px;
+    font-size: 11px;
+    color: #00ffe5;
+    z-index: 1000;
+    display: none;
+    max-width: 240px;
+    min-width: 180px;
+    box-shadow: 0 0 16px rgba(0,255,229,0.2);
+    pointer-events: auto;
   }
-  #tooltip .tt-title { color: #ffe600; font-size: 12px; margin-bottom: 4px; }
-  #tooltip .tt-url   { color: #7eeedd; font-size: 10px; word-break: break-all; }
-  #tooltip .tt-sub   { color: #ff2d9b; font-size: 10px; margin-top: 4px; cursor: pointer; text-decoration: underline; }
-  #tooltip .tt-empty { color: rgba(0,255,229,0.5); font-size: 10px; }
+  #pixel-popup .pp-title  { color: #ffe600; font-size: 12px; margin-bottom: 4px; font-weight: bold; }
+  #pixel-popup .pp-url    { color: #7eeedd; font-size: 10px; word-break: break-all; margin-bottom: 6px; }
+  #pixel-popup .pp-sub    {
+    display: inline-block; margin-top: 6px;
+    font-size: 10px; color: #ff2d9b;
+    border: 1px solid rgba(255,45,155,0.4);
+    padding: 4px 10px; border-radius: 2px;
+    cursor: pointer; text-decoration: none;
+    transition: background 0.15s;
+  }
+  #pixel-popup .pp-sub:hover { background: rgba(255,45,155,0.15); }
+  #pixel-popup .pp-empty  { color: rgba(0,255,229,0.45); font-size: 10px; }
+  #pixel-popup .pp-close  {
+    position: absolute; top: 6px; right: 8px;
+    font-size: 13px; color: rgba(0,255,229,0.35);
+    cursor: pointer; line-height: 1; background: none; border: none;
+  }
+  #pixel-popup .pp-close:hover { color: #00ffe5; }
+
+  /* 빈 픽셀 툴팁은 마우스 따라다니는 작은 것 유지 */
+  #tooltip {
+    position: fixed; background: rgba(4,13,18,0.92); border: 1px solid rgba(0,255,229,0.3);
+    border-radius: 3px; padding: 5px 10px; font-size: 10px; color: rgba(0,255,229,0.6);
+    pointer-events: none; z-index: 999; display: none; white-space: nowrap;
+  }
 
   /* ── MODAL ── */
   #modal-overlay {
@@ -607,12 +637,16 @@
 
 <div class="scan-line"></div>
 
-<div id="tooltip">
-  <div class="tt-title" id="tt-title"></div>
-  <div class="tt-url"   id="tt-url"></div>
-  <div class="tt-sub"   id="tt-sub"></div>
-  <div class="tt-empty" id="tt-empty"></div>
+<!-- 광고주 팝업 카드 (고정, 클릭 가능) -->
+<div id="pixel-popup">
+  <button class="pp-close" onclick="closePopup()">✕</button>
+  <div class="pp-title"  id="pp-title"></div>
+  <div class="pp-url"    id="pp-url"></div>
+  <div id="pp-sub-wrap"></div>
 </div>
+
+<!-- 빈 픽셀 좌표 툴팁 (마우스 따라다님) -->
+<div id="tooltip"></div>
 
 <header>
   <!-- 시각적으로는 사이트 타이틀로 보이지만 시맨틱상 H1 -->
@@ -1077,45 +1111,116 @@ function getBlock(clientX, clientY) {
 }
 function findAd(bx, by) { return pixelMap[`${bx},${by}`] || null; }
 
-function showTooltip(ad, bx, by, x, y) {
-  if (ad) {
-    document.getElementById('tt-title').textContent = ad.title;
-    document.getElementById('tt-url').textContent   = ad.url;
-    document.getElementById('tt-empty').textContent = '';
-    const subEl = document.getElementById('tt-sub');
-    if (ad.id) {
-      subEl.textContent = '▶ 광고주 상세페이지 보기';
-      subEl.onclick = e => { e.stopPropagation(); window.open(`advertiser/index.html?id=${ad.id}`, '_blank'); };
-    } else { subEl.textContent = ''; subEl.onclick = null; }
+/* ── 팝업 (광고주 블록) ── */
+const popup   = document.getElementById('pixel-popup');
+let popupAd   = null;
+let hideTimer = null;
+
+function showPopup(ad, canvasRect) {
+  popupAd = ad;
+  clearTimeout(hideTimer);
+
+  document.getElementById('pp-title').textContent = ad.title;
+  document.getElementById('pp-url').textContent   = ad.url;
+
+  const wrap = document.getElementById('pp-sub-wrap');
+  if (ad.id) {
+    wrap.innerHTML =
+      `<a class="pp-sub" href="advertiser/index.html?id=${ad.id}" target="_blank" rel="noopener">
+        ▶ 광고주 상세페이지 보기
+      </a>`;
   } else {
-    document.getElementById('tt-title').textContent = '';
-    document.getElementById('tt-url').textContent   = '';
-    document.getElementById('tt-sub').textContent   = '';
-    document.getElementById('tt-empty').textContent = `좌표 (${bx*10}, ${by*10}) — 빈 픽셀`;
+    wrap.innerHTML = '';
   }
-  tooltip.style.left    = (x + 14) + 'px';
-  tooltip.style.top     = (y - 10) + 'px';
-  tooltip.style.display = 'block';
+
+  // 팝업 위치: 광고 블록 오른쪽 상단에 고정
+  const px = ad.bx * BLOCK;
+  const py = ad.by * BLOCK;
+  const scale = canvasRect.width / CANVAS_SIZE;
+  const screenX = canvasRect.left + (px + ad.bw * BLOCK) * scale + 8;
+  const screenY = canvasRect.top  + py * scale;
+
+  // 화면 오른쪽 넘침 방지
+  const popW = 240;
+  const left = (screenX + popW > window.innerWidth)
+    ? canvasRect.left + px * scale - popW - 8
+    : screenX;
+
+  popup.style.left    = left + 'px';
+  popup.style.top     = Math.max(8, screenY) + 'px';
+  popup.style.display = 'block';
+}
+
+function closePopup() {
+  popup.style.display = 'none';
+  popupAd = null;
+  lastHoverKey = null;
+}
+
+// 팝업 위에 마우스가 있을 때는 닫히지 않음
+popup.addEventListener('mouseenter', () => clearTimeout(hideTimer));
+popup.addEventListener('mouseleave', () => {
+  hideTimer = setTimeout(closePopup, 200);
+});
+
+/* ── 빈 픽셀 툴팁 (좌표 표시) ── */
+function showEmptyTooltip(bx, by, x, y) {
+  tooltip.textContent    = `(${bx*10}, ${by*10})`;
+  tooltip.style.left     = (x + 12) + 'px';
+  tooltip.style.top      = (y - 24) + 'px';
+  tooltip.style.display  = 'block';
 }
 
 canvas.addEventListener('mousemove', e => {
   const { bx, by } = getBlock(e.clientX, e.clientY);
   const key = `${bx},${by}`;
-  if (key !== lastHoverKey) { lastHoverKey = key; showTooltip(findAd(bx,by), bx, by, e.clientX, e.clientY); }
-  else { tooltip.style.left = (e.clientX+14)+'px'; tooltip.style.top = (e.clientY-10)+'px'; }
+
+  if (key === lastHoverKey) {
+    // 빈 픽셀이면 툴팁 위치만 업데이트
+    if (!popupAd) {
+      tooltip.style.left = (e.clientX+12)+'px';
+      tooltip.style.top  = (e.clientY-24)+'px';
+    }
+    return;
+  }
+  lastHoverKey = key;
+
+  const ad = findAd(bx, by);
+  if (ad) {
+    tooltip.style.display = 'none';
+    const rect = canvas.getBoundingClientRect();
+    showPopup(ad, rect);
+  } else {
+    // 광고 블록 밖으로 나오면 팝업 딜레이 후 닫기
+    if (popupAd) {
+      hideTimer = setTimeout(closePopup, 300);
+    }
+    showEmptyTooltip(bx, by, e.clientX, e.clientY);
+  }
 });
-canvas.addEventListener('mouseleave', () => { tooltip.style.display = 'none'; lastHoverKey = null; });
+
+canvas.addEventListener('mouseleave', () => {
+  tooltip.style.display = 'none';
+  // 캔버스 밖으로 나가면 팝업도 딜레이 후 닫기 (팝업으로 이동 중일 수 있으므로)
+  hideTimer = setTimeout(closePopup, 300);
+  lastHoverKey = null;
+});
+
 canvas.addEventListener('click', e => {
   const { bx, by } = getBlock(e.clientX, e.clientY);
   const ad = findAd(bx, by);
   if (ad && ad.url) window.open(ad.url, '_blank');
 });
+
 canvas.addEventListener('touchend', e => {
   e.preventDefault();
   const t = e.changedTouches[0];
   const { bx, by } = getBlock(t.clientX, t.clientY);
   const ad = findAd(bx, by);
-  if (ad && ad.url) window.open(ad.url, '_blank');
+  if (ad) {
+    const rect = canvas.getBoundingClientRect();
+    showPopup(ad, rect);
+  }
 }, { passive: false });
 
 /* ── FAQ 토글 ── */
